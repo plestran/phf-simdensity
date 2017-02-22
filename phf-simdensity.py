@@ -351,8 +351,6 @@ def quaternion_rep(angles,ngridT):
         for h in range(g):
 #           q_angles[g,h] = 2*np.arccos(np.abs(np.dot(quats[g],quats[h])))
             q_angles[g,h] = np.arccos(2*np.dot(quats[g],quats[h])**2 - 1)
-            if np.dot(quats[g],quats[h]) < 0:
-                print "Going the long way"
 
     # integrate over rotation to get arc length
     nslerp = 10
