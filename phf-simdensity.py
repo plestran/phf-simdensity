@@ -2,6 +2,8 @@ import re
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+import matplotlib.patches as mpatches
+from mpl_toolkits.mplot3d import Axes3D
 
 '''
      (C) Patrick Lestrange 2017
@@ -388,7 +390,88 @@ def plot_quaternion_angles(dist,q_angles,slerp_len):
 
     plt.tight_layout()
     plt.show()
- 
+
+def plot_sphere_heatmap(dist,angles,ngridT):
+
+    plot_axis = 2
+    nplots    = plot_axis**2
+    nmod = int(26/nplots)
+    thresh  = 1.e-3
+
+    fig = plt.figure()
+
+    # plot a unit sphere
+    phi = np.linspace(0, 2 * np.pi, 26)
+    theta = np.linspace(0, np.pi, 26)
+    x = np.outer(np.cos(phi), np.sin(theta))
+    y = np.outer(np.sin(phi), np.sin(theta))
+    z = np.outer(np.ones(np.size(phi)), np.cos(theta))
+
+    # define list of alpha/beta combinations to plot for a given gamma
+    icount = 1
+    g_angle = 0.392699082 
+    ab_angs = []
+    for g, angle in enumerate(angles):
+        if abs(angle['gamma']-g_angle) < thresh:
+            if icount % nmod == 0:
+                ab_angs.append((angle['alpha'],angle['beta']))
+            icount += 1
+  
+    icount = 1
+    for a_angle, b_angle in ab_angs:
+        ax = fig.add_subplot(plot_axis,plot_axis,icount, projection='3d')
+        ax.plot_surface(x, y, z, color='b',alpha=0.1)
+
+        # define cartesian coordinates for alpha/beta with fixed gamma
+        theta, phi = [], []
+        for g, angle in enumerate(angles):
+            if abs(angle['gamma']-g_angle) < thresh:
+                theta.append(angle['alpha'])
+                phi.append(angle['beta'])
+        npoints = len(theta)
+        xx = np.zeros([npoints])
+        yy = np.zeros([npoints])
+        zz = np.zeros([npoints])
+        for i in range(npoints):
+            if abs(theta[i] - a_angle) < thresh and abs(phi[i] - b_angle) < thresh:
+                index = i
+            xx[i] = np.sin(theta[i]) * np.cos(phi[i])
+            yy[i] = np.sin(theta[i]) * np.sin(phi[i])
+            zz[i] = np.cos(theta[i])
+    
+        # define difference color map for fixed angle
+        distances = []
+        for g in range(ngridT):
+            adiff = abs(angles[g]['alpha'] - a_angle)
+            bdiff = abs(angles[g]['beta']  - b_angle)
+            gdiff = abs(angles[g]['gamma'] - g_angle)
+#           if gdiff < thresh:
+#               print angles[g]
+            if adiff < thresh and bdiff < thresh and gdiff < thresh:
+                for h in range(ngridT):
+                    gdiff = abs(angles[h]['gamma'] - g_angle)
+                    if gdiff < thresh:
+                        distances.append(dist[0,h,g])
+    
+        # plot lebedev points on sphere colored by Euclidean distances
+        ax.set_title('(%.4f,%.4f,%.4f)' %(a_angle, b_angle, g_angle))
+        ax.scatter(xx,yy,zz,c=distances,s=100,cmap='gray')
+        ax.scatter(xx[index],yy[index],zz[index],color='red',s=200)
+        ax.set_xlim([-1,1])
+        ax.set_ylim([-1,1])
+        ax.set_zlim([-1,1])
+        ax.set_aspect("equal")
+        ax.set_xlabel('X axis')
+        ax.set_ylabel('Y axis')
+        ax.set_zlabel('Z axis')
+
+        icount += 1
+
+    plt.tight_layout()
+#   plt.title('Alpha = %.4f, Beta = %.4f, Gamma = %.4f \n X = %.4f, Y = %.4f, Z = %.4f' % (a_angle, b_angle, g_angle, xx[0], yy[0], zz[0]))  
+# rotate the axes and update
+    plt.show()
+
 if __name__ == '__main__':
  
     # grab rotated densities from the output file 
@@ -401,6 +484,7 @@ if __name__ == '__main__':
     # calculate euclidean distance between each rotated density matrix
     dist = euc_distance(rot_dens,ngridT)
 #   plot_euc_heatmap(dist)
+    plot_sphere_heatmap(dist,angles,ngridT)
 
     # calculate the differences between each rotation angle
 #   diffs = angle_differences(angles,ngridT)
@@ -408,8 +492,8 @@ if __name__ == '__main__':
 
     # calculate the angles and slerp lengths between the quaternion 
     # representation of the rotations
-    quats, q_angles, slerp_len = quaternion_rep(angles,ngridT)
-    plot_quaternion_angles(dist,q_angles,slerp_len)
+#   quats, q_angles, slerp_len = quaternion_rep(angles,ngridT)
+#   plot_quaternion_angles(dist,q_angles,slerp_len)
 
     # calculate the arc lengths between each point
 #   arcs = arc_lengths(angles,ngridT)
