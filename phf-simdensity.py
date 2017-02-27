@@ -393,7 +393,7 @@ def plot_quaternion_angles(dist,q_angles,slerp_len):
 
 def plot_sphere_heatmap(dist,angles,ngridT):
 
-    plot_axis = 2
+    plot_axis = 1
     nplots    = plot_axis**2
     nmod = int(26/nplots)
     thresh  = 1.e-3
@@ -420,39 +420,38 @@ def plot_sphere_heatmap(dist,angles,ngridT):
     icount = 1
     for a_angle, b_angle in ab_angs:
         ax = fig.add_subplot(plot_axis,plot_axis,icount, projection='3d')
-        ax.plot_surface(x, y, z, color='b',alpha=0.1)
+#       ax.plot_surface(x, y, z, color='b',alpha=0.1)
 
         # define cartesian coordinates for alpha/beta with fixed gamma
         theta, phi = [], []
         for g, angle in enumerate(angles):
             if abs(angle['gamma']-g_angle) < thresh:
-                theta.append(angle['alpha'])
-                phi.append(angle['beta'])
+                phi.append(angle['alpha'])
+                theta.append(angle['beta'])
         npoints = len(theta)
         xx = np.zeros([npoints])
         yy = np.zeros([npoints])
         zz = np.zeros([npoints])
         for i in range(npoints):
-            if abs(theta[i] - a_angle) < thresh and abs(phi[i] - b_angle) < thresh:
+            if abs(phi[i] - a_angle) < thresh and abs(theta[i] - b_angle) < thresh:
                 index = i
             xx[i] = np.sin(theta[i]) * np.cos(phi[i])
             yy[i] = np.sin(theta[i]) * np.sin(phi[i])
             zz[i] = np.cos(theta[i])
     
-        # define difference color map for fixed angle
+        # define difference color map for a fixed angle
         distances = []
         for g in range(ngridT):
             adiff = abs(angles[g]['alpha'] - a_angle)
             bdiff = abs(angles[g]['beta']  - b_angle)
             gdiff = abs(angles[g]['gamma'] - g_angle)
-#           if gdiff < thresh:
-#               print angles[g]
             if adiff < thresh and bdiff < thresh and gdiff < thresh:
                 for h in range(ngridT):
                     gdiff = abs(angles[h]['gamma'] - g_angle)
                     if gdiff < thresh:
-                        distances.append(dist[0,h,g])
-    
+                        distances.append(dist[0,g,h])
+
+        print distances
         # plot lebedev points on sphere colored by Euclidean distances
         ax.set_title('(%.4f,%.4f,%.4f)' %(a_angle, b_angle, g_angle))
         ax.scatter(xx,yy,zz,c=distances,s=100,cmap='gray')
@@ -472,6 +471,78 @@ def plot_sphere_heatmap(dist,angles,ngridT):
 # rotate the axes and update
     plt.show()
 
+def plot_sphere_path(dist,angles,ngridT):
+
+    thresh  = 1.e-3
+    fig = plt.figure()
+
+    # plot a unit sphere
+    phi = np.linspace(0, 2 * np.pi, 50)
+    theta = np.linspace(0, np.pi, 50)
+    x = np.outer(np.cos(phi), np.sin(theta))
+    y = np.outer(np.sin(phi), np.sin(theta))
+    z = np.outer(np.ones(np.size(phi)), np.cos(theta))
+    ax = fig.add_subplot(111, projection='3d')
+    ax.plot_surface(x, y, z, color='b',alpha=0.1)
+
+    # plot alpha/beta combinations for a given gamma
+    g_angle = 0.392699082 
+    ab_angs = []
+    for g, angle in enumerate(angles):
+        if abs(angle['gamma']-g_angle) < thresh:
+            ab_angs.append((angle['alpha'],angle['beta']))
+    npoints = len(ab_angs)
+    xx, yy, zz = np.zeros([npoints]), np.zeros([npoints]), np.zeros([npoints])
+    for i, angle in enumerate(ab_angs):
+        xx[i] = np.sin(angle[1]) * np.cos(angle[0])
+        yy[i] = np.sin(angle[1]) * np.sin(angle[0])
+        zz[i] = np.cos(angle[1])
+    ax.scatter(xx,yy,zz,color='b',s=100)
+    ax.scatter(xx[0],yy[0],zz[0],color='red',s=200)
+    
+    # determine paths through the grid points
+    icount = 0
+    path = np.zeros([3,npoints])
+    ang_path = [ab_angs[0]]
+    v1, v2 = np.zeros([3]), np.zeros([3])
+    while icount < 26:
+        a_angle = ang_path[icount][0]
+        b_angle = ang_path[icount][1]
+
+        # define current cartesian point
+        v1[0] = np.sin(b_angle) * np.cos(a_angle)
+        v1[1] = np.sin(b_angle) * np.sin(a_angle)
+        v1[2] = np.cos(b_angle)
+        if icount == 0:
+            path[0,icount], path[1,icount], path[2,icount] = v1[0], v1[1], v1[2]
+
+        # find the shortest distance to the next one (not already in path)
+        min_dist = 1000.
+        for a2_angle, b2_angle in ab_angs:
+            v2[0] = np.sin(b2_angle) * np.cos(a2_angle)
+            v2[1] = np.sin(b2_angle) * np.sin(a2_angle)
+            v2[2] = np.cos(b2_angle)
+            found_dist = np.linalg.norm(v1-v2)
+            if found_dist < min_dist and (a2_angle, b2_angle) not in ang_path:
+                min_dist = found_dist
+                min_angs = (a2_angle,b2_angle)
+                path[0,icount+1], path[1,icount+1], path[2,icount+1] = v2[0], v2[1], v2[2]
+        ang_path.append(min_angs)
+        icount += 1
+
+    ax.plot(path[0],path[1],path[2])
+#   ax.plot(path[0,:3],path[1,:3],path[2,:3])
+
+    ax.set_xlim([-1,1])
+    ax.set_ylim([-1,1])
+    ax.set_zlim([-1,1])
+    ax.set_aspect("equal")
+    ax.set_xlabel('X axis')
+    ax.set_ylabel('Y axis')
+    ax.set_zlabel('Z axis')
+    plt.tight_layout()
+    plt.show()
+
 if __name__ == '__main__':
  
     # grab rotated densities from the output file 
@@ -484,7 +555,8 @@ if __name__ == '__main__':
     # calculate euclidean distance between each rotated density matrix
     dist = euc_distance(rot_dens,ngridT)
 #   plot_euc_heatmap(dist)
-    plot_sphere_heatmap(dist,angles,ngridT)
+#   plot_sphere_heatmap(dist,angles,ngridT)
+    plot_sphere_path(dist,angles,ngridT)
 
     # calculate the differences between each rotation angle
 #   diffs = angle_differences(angles,ngridT)
