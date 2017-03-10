@@ -14,6 +14,9 @@ from mpl_toolkits.mplot3d import Axes3D
 '''
 
 def grab_matrices(cq_file,nbasis):
+    ''' Grabs the rotated density matrices and rotation angles 
+        from a PHF output file from Chronus
+    '''
     
     # determine the total number of grid points
     search_file = open(cq_file, "r")
@@ -90,6 +93,9 @@ def grab_matrices(cq_file,nbasis):
     return ngridT, angles, ang_list, rot_dens
 
 def euc_distance(rot_dens,ngridT):
+    ''' Calculates the Euclidean distance between all the rotated densities
+        and stores them in the matrix dist
+    '''
 
     # calculate the euclidean distance between all rotated densities
     min_dist = []
@@ -391,7 +397,7 @@ def plot_quaternion_angles(dist,q_angles,slerp_len):
     plt.tight_layout()
     plt.show()
 
-def plot_sphere_heatmap(dist,angles,ngridT):
+def plot_sphere_heatmap(dist,angles,ngridT,g_angle):
 
     plot_axis = 1
     nplots    = plot_axis**2
@@ -409,7 +415,6 @@ def plot_sphere_heatmap(dist,angles,ngridT):
 
     # define list of alpha/beta combinations to plot for a given gamma
     icount = 1
-    g_angle = 0.392699082 
     ab_angs = []
     for g, angle in enumerate(angles):
         if abs(angle['gamma']-g_angle) < thresh:
@@ -440,7 +445,7 @@ def plot_sphere_heatmap(dist,angles,ngridT):
             zz[i] = np.cos(theta[i])
     
         # define difference color map for a fixed angle
-        distances = []
+        distances, d_index = [], []
         for g in range(ngridT):
             adiff = abs(angles[g]['alpha'] - a_angle)
             bdiff = abs(angles[g]['beta']  - b_angle)
@@ -450,8 +455,18 @@ def plot_sphere_heatmap(dist,angles,ngridT):
                     gdiff = abs(angles[h]['gamma'] - g_angle)
                     if gdiff < thresh:
                         distances.append(dist[0,g,h])
+                        d_index.append(h)
 
-        print distances
+        v0 = np.sin(b_angle) * np.cos(a_angle)
+        v1 = np.sin(b_angle) * np.sin(a_angle)
+        v2 = np.cos(b_angle)
+        print a_angle, b_angle, g_angle, v0, v1, v2
+        for g in range(len(distances)):
+            angle = angles[d_index[g]]
+            v0 = np.sin(angle['beta']) * np.cos(angle['alpha'])
+            v1 = np.sin(angle['beta']) * np.sin(angle['alpha'])
+            v2 = np.cos(angle['beta'])
+            print distances[g], angle, v0, v1, v2
         # plot lebedev points on sphere colored by Euclidean distances
         ax.set_title('(%.4f,%.4f,%.4f)' %(a_angle, b_angle, g_angle))
         ax.scatter(xx,yy,zz,c=distances,s=100,cmap='gray')
@@ -468,12 +483,108 @@ def plot_sphere_heatmap(dist,angles,ngridT):
 
     plt.tight_layout()
 #   plt.title('Alpha = %.4f, Beta = %.4f, Gamma = %.4f \n X = %.4f, Y = %.4f, Z = %.4f' % (a_angle, b_angle, g_angle, xx[0], yy[0], zz[0]))  
-# rotate the axes and update
     plt.show()
 
-def plot_sphere_path(dist,angles,ngridT):
+def find_path_from_angles(dist,angles,ngridT,g_angle):
 
     thresh  = 1.e-3
+
+    # plot alpha/beta combinations for a given gamma
+    ab_angs, ang_ind = [], []
+    for g, angle in enumerate(angles):
+        if abs(angle['gamma']-g_angle) < thresh:
+            ab_angs.append((angle['alpha'],angle['beta']))
+            ang_ind.append(g)
+    npoints = len(ab_angs)
+
+    # determine paths through the grid points
+    icount = 0
+    total_dist = 0.
+    path = np.zeros([3,npoints])
+    ang_path = [ab_angs[0]]
+    v1, v2 = np.zeros([3]), np.zeros([3])
+    while icount < 25:
+        a_angle = ang_path[icount][0]
+        b_angle = ang_path[icount][1]
+
+        # define current cartesian point
+        v1[0] = np.sin(b_angle) * np.cos(a_angle)
+        v1[1] = np.sin(b_angle) * np.sin(a_angle)
+        v1[2] = np.cos(b_angle)
+        if icount == 0:
+            path[0,icount], path[1,icount], path[2,icount] = v1[0], v1[1], v1[2]
+
+        # find the shortest distance to the next one (not already in path)
+        ind_ang = 0
+        min_dist = 1000.
+        for a2_angle, b2_angle in ab_angs:
+            v2[0] = np.sin(b2_angle) * np.cos(a2_angle)
+            v2[1] = np.sin(b2_angle) * np.sin(a2_angle)
+            v2[2] = np.cos(b2_angle)
+            found_dist = np.linalg.norm(v1-v2)
+            if found_dist < min_dist and (a2_angle, b2_angle) not in ang_path:
+                min_dist = found_dist
+                euc_dist = dist[0,ang_ind[ind_ang],icount]
+                min_angs = (a2_angle,b2_angle)
+                path[0,icount+1], path[1,icount+1], path[2,icount+1] = v2[0], v2[1], v2[2]
+            ind_ang += 1
+        total_dist += euc_dist
+        ang_path.append(min_angs)
+        icount += 1
+
+    return path, total_dist
+
+def find_path_from_dist(dist,angles,ngridT,g_angle):
+
+    thresh  = 1.e-3
+
+    # plot alpha/beta combinations for a given gamma
+    ab_angs, ang_ind = [], []
+    for g, angle in enumerate(angles):
+        if abs(angle['gamma']-g_angle) < thresh:
+            ab_angs.append((angle['alpha'],angle['beta']))
+            ang_ind.append(g)
+    npoints = len(ab_angs)
+ 
+    # determine paths through the grid points based on density diffs.
+    icount = 0
+    total_dist = 0.
+    path = np.zeros([3,npoints])
+    ang_path = [ab_angs[0]]
+    v1, v2 = np.zeros([3]), np.zeros([3])
+    while icount < 25:
+        a_angle = ang_path[icount][0]
+        b_angle = ang_path[icount][1]
+
+        # define current cartesian point
+        v1[0] = np.sin(b_angle) * np.cos(a_angle)
+        v1[1] = np.sin(b_angle) * np.sin(a_angle)
+        v1[2] = np.cos(b_angle)
+        if icount == 0:
+            path[0,icount], path[1,icount], path[2,icount] = v1[0], v1[1], v1[2]
+
+#       # find the shortest distance to the next one (not already in path)
+        ind_ang = 0
+        min_dist = 1000.
+        for a2_angle, b2_angle in ab_angs:
+            v2[0] = np.sin(b2_angle) * np.cos(a2_angle)
+            v2[1] = np.sin(b2_angle) * np.sin(a2_angle)
+            v2[2] = np.cos(b2_angle)
+            found_dist = dist[0,ang_ind[ind_ang],icount]
+            if found_dist < min_dist and (a2_angle, b2_angle) not in ang_path:
+                min_dist = found_dist
+                min_angs = (a2_angle,b2_angle)
+                path[0,icount+1], path[1,icount+1], path[2,icount+1] = v2[0], v2[1], v2[2]
+            ind_ang += 1
+        total_dist += min_dist
+        ang_path.append(min_angs)
+        icount += 1
+
+    return path, total_dist
+
+def plot_paths(a_path,d_path,angles):
+
+    thresh = 1.e-3
     fig = plt.figure()
 
     # plot a unit sphere
@@ -486,11 +597,11 @@ def plot_sphere_path(dist,angles,ngridT):
     ax.plot_surface(x, y, z, color='b',alpha=0.1)
 
     # plot alpha/beta combinations for a given gamma
-    g_angle = 0.392699082 
-    ab_angs = []
+    ab_angs, ang_ind = [], []
     for g, angle in enumerate(angles):
         if abs(angle['gamma']-g_angle) < thresh:
             ab_angs.append((angle['alpha'],angle['beta']))
+            ang_ind.append(g)
     npoints = len(ab_angs)
     xx, yy, zz = np.zeros([npoints]), np.zeros([npoints]), np.zeros([npoints])
     for i, angle in enumerate(ab_angs):
@@ -499,49 +610,20 @@ def plot_sphere_path(dist,angles,ngridT):
         zz[i] = np.cos(angle[1])
     ax.scatter(xx,yy,zz,color='b',s=100)
     ax.scatter(xx[0],yy[0],zz[0],color='red',s=200)
-    
-    # determine paths through the grid points
-    icount = 0
-    path = np.zeros([3,npoints])
-    ang_path = [ab_angs[0]]
-    v1, v2 = np.zeros([3]), np.zeros([3])
-    while icount < 26:
-        a_angle = ang_path[icount][0]
-        b_angle = ang_path[icount][1]
 
-        # define current cartesian point
-        v1[0] = np.sin(b_angle) * np.cos(a_angle)
-        v1[1] = np.sin(b_angle) * np.sin(a_angle)
-        v1[2] = np.cos(b_angle)
-        if icount == 0:
-            path[0,icount], path[1,icount], path[2,icount] = v1[0], v1[1], v1[2]
-
-        # find the shortest distance to the next one (not already in path)
-        min_dist = 1000.
-        for a2_angle, b2_angle in ab_angs:
-            v2[0] = np.sin(b2_angle) * np.cos(a2_angle)
-            v2[1] = np.sin(b2_angle) * np.sin(a2_angle)
-            v2[2] = np.cos(b2_angle)
-            found_dist = np.linalg.norm(v1-v2)
-            if found_dist < min_dist and (a2_angle, b2_angle) not in ang_path:
-                min_dist = found_dist
-                min_angs = (a2_angle,b2_angle)
-                path[0,icount+1], path[1,icount+1], path[2,icount+1] = v2[0], v2[1], v2[2]
-        ang_path.append(min_angs)
-        icount += 1
-
-    ax.plot(path[0],path[1],path[2])
-#   ax.plot(path[0,:3],path[1,:3],path[2,:3])
+    ax.plot(a_path[0],a_path[1],a_path[2])
+    ax.plot(d_path[0],d_path[1],d_path[2])
 
     ax.set_xlim([-1,1])
     ax.set_ylim([-1,1])
     ax.set_zlim([-1,1])
-    ax.set_aspect("equal")
+    ax.set_aspect('equal')
     ax.set_xlabel('X axis')
     ax.set_ylabel('Y axis')
     ax.set_zlabel('Z axis')
     plt.tight_layout()
-    plt.show()
+    plt.title("Gamma = %.4f" % g_angle)
+#   plt.show()
 
 if __name__ == '__main__':
  
@@ -555,8 +637,27 @@ if __name__ == '__main__':
     # calculate euclidean distance between each rotated density matrix
     dist = euc_distance(rot_dens,ngridT)
 #   plot_euc_heatmap(dist)
-#   plot_sphere_heatmap(dist,angles,ngridT)
-    plot_sphere_path(dist,angles,ngridT)
+
+
+    # find paths through the lebedev grid for fixed gamma value
+    g_angle = 0.392699082 
+    plot_sphere_heatmap(dist,angles,ngridT,g_angle)
+#   a_path, total_dist1 = find_path_from_angles(dist,angles,ngridT,g_angle)
+#   d_path, total_dist2 = find_path_from_dist(dist,angles,ngridT,g_angle)
+#   print "Gamma      = ", g_angle
+#   print "Angle-Dist = ", total_dist1
+#   print "Euc-Dist   = ", total_dist2
+#   plot_paths(a_path,d_path,angles)
+
+#   g_angle = 1.17809725
+#   a_path, total_dist1 = find_path_from_angles(dist,angles,ngridT,g_angle)
+#   d_path, total_dist2 = find_path_from_dist(dist,angles,ngridT,g_angle)
+#   print "\nGamma      = ", g_angle
+#   print "Angle-Dist = ", total_dist1
+#   print "Euc-Dist   = ", total_dist2
+#   plot_paths(a_path,d_path,angles)
+
+#   plt.show()
 
     # calculate the differences between each rotation angle
 #   diffs = angle_differences(angles,ngridT)
